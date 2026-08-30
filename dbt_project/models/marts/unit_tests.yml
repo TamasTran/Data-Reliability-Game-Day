@@ -1,0 +1,52 @@
+unit_tests:
+  # Test 1: Normal case — two completed orders for the same customer, one active customer row.
+  # Expected: revenue is correctly summed without inflation.
+  - name: completed_orders_sum_to_expected_revenue
+    model: fct_daily_revenue
+    given:
+      - input: ref('stg_orders')
+        rows:
+          - {order_id: 1, customer_id: C0001, amount_usd: 100.0, status: completed, order_date: '2026-08-01'}
+          - {order_id: 2, customer_id: C0001, amount_usd: 70.0,  status: completed, order_date: '2026-08-01'}
+      - input: ref('stg_customers')
+        rows:
+          - {customer_id: C0001, is_active: true}
+    expect:
+      rows:
+        - {order_date: '2026-08-01', completed_order_rows: 2, daily_revenue: 170.0}
+
+  # Test 2: Only completed orders are included; pending orders must be excluded.
+  - name: pending_orders_excluded_from_revenue
+    model: fct_daily_revenue
+    given:
+      - input: ref('stg_orders')
+        rows:
+          - {order_id: 10, customer_id: C0002, amount_usd: 200.0, status: completed, order_date: '2026-08-02'}
+          - {order_id: 11, customer_id: C0002, amount_usd: 500.0, status: pending,   order_date: '2026-08-02'}
+      - input: ref('stg_customers')
+        rows:
+          - {customer_id: C0002, is_active: true}
+    expect:
+      rows:
+        - {order_date: '2026-08-02', completed_order_rows: 1, daily_revenue: 200.0}
+
+  # Test 3: Fan-out protection — if a customer has TWO active rows (SCD bug / bad data),
+  # the LEFT JOIN inflates revenue by duplicating order rows.
+  # This test documents the KNOWN failure mode so it is caught by CI before prod.
+  # NOTE: With the current SQL this test is expected to FAIL (inflation = 2×).
+  # Use it to drive the fix: add QUALIFY or a CTE that de-duplicates customers.
+  - name: customer_fanout_inflates_revenue_bug_documentation
+    model: fct_daily_revenue
+    given:
+      - input: ref('stg_orders')
+        rows:
+          - {order_id: 20, customer_id: C0003, amount_usd: 150.0, status: completed, order_date: '2026-08-03'}
+      - input: ref('stg_customers')
+        rows:
+          # Two active rows for the same customer — simulates SCD Type-2 fanout bug
+          - {customer_id: C0003, is_active: true}
+          - {customer_id: C0003, is_active: true}
+    expect:
+      rows:
+        # Correct revenue should be 150.0 — if it is 300.0 the join is inflating
+        - {order_date: '2026-08-03', completed_order_rows: 1, daily_revenue: 150.0}

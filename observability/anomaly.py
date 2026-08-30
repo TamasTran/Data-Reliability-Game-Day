@@ -1,7 +1,4 @@
-"""Anomaly detection starter.
-
-Z-score is deliberately the default baseline. Students should improve `auto`
-mode for seasonality/outliers rather than deleting the simple implementation.
+"""Anomaly detection module supporting Z-score, MAD, and context-aware auto detection.
 """
 from __future__ import annotations
 
@@ -29,17 +26,44 @@ def zscore_detector(current: float, history: Iterable[float], threshold: float =
 
 
 def mad_detector(current: float, history: Iterable[float], threshold: float = 3.5) -> dict[str, Any]:
-    """Robust example, intentionally incomplete around zero-MAD edge cases.
-
-    Students may improve this function and/or use it from auto mode.
-    """
+    """Robust Median Absolute Deviation (MAD) detector handling zero-MAD edge cases."""
     values = np.asarray(list(history), dtype=float)
-    if values.size < 5:
+    if values.size < 3:
         return {"is_anomaly": False, "score": 0.0, "method": "mad", "reason": "insufficient_history"}
+    
     median = float(np.median(values))
     mad = float(np.median(np.abs(values - median)))
+    
     if mad == 0:
-        return {"is_anomaly": False, "score": 0.0, "method": "mad", "reason": "mad_is_zero_todo"}
+        # Fallback 1: Mean absolute deviation from median
+        mean_ad = float(np.mean(np.abs(values - median)))
+        if mean_ad > 0:
+            modified_z = 0.6745 * abs(float(current) - median) / mean_ad
+            return {
+                "is_anomaly": bool(modified_z > threshold),
+                "score": float(modified_z),
+                "method": "mad",
+                "reason": f"median={median:.3f}, mad_fallback_mean_ad={mean_ad:.3f}, threshold={threshold}",
+            }
+        # Fallback 2: Standard deviation
+        std = float(np.std(values))
+        if std > 0:
+            score = abs(float(current) - median) / std
+            return {
+                "is_anomaly": bool(score > threshold),
+                "score": float(score),
+                "method": "mad",
+                "reason": f"median={median:.3f}, mad_fallback_std={std:.3f}, threshold={threshold}",
+            }
+        # All values in history are identical
+        score = float("inf") if float(current) != median else 0.0
+        return {
+            "is_anomaly": bool(score > threshold),
+            "score": float(score),
+            "method": "mad",
+            "reason": f"median={median:.3f}, history_constant=True",
+        }
+
     modified_z = 0.6745 * abs(float(current) - median) / mad
     return {
         "is_anomaly": bool(modified_z > threshold),
@@ -57,24 +81,42 @@ def detect_anomaly(
     threshold: float = 3.0,
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Stable lab API.
+    """Context-aware anomaly detector."""
+    hist_list = list(history)
 
-    Current starter behavior:
-    - `zscore`: basic z-score.
-    - `mad`: MAD example.
-    - `auto`: still uses naive z-score and ignores context.
+    # Process context-based history filtering if available
+    effective_history = hist_list
+    context_applied: list[str] = []
 
-    TODO(student): make `auto` context-aware. Useful context keys used by the
-    instructor may include `day_of_week`, `same_segment_history`,
-    `metric_name`, `known_event`, and `trend`.
-    """
+    if context:
+        if "same_segment_history" in context and context["same_segment_history"]:
+            seg_hist = list(context["same_segment_history"])
+            if len(seg_hist) >= 3:
+                effective_history = seg_hist
+                context_applied.append("same_segment_history")
+
+        if "known_event" in context and context["known_event"]:
+            # If known promotional/maintenance event, relax threshold or mark context
+            context_applied.append(f"event={context['known_event']}")
+
     if method == "mad":
-        return mad_detector(current, history)
-    if method in {"zscore", "auto"}:
-        result = zscore_detector(current, history, threshold=threshold)
-        if method == "auto":
-            result["method"] = "auto:zscore"
-            if context:
-                result["reason"] += "; context_ignored_by_starter=true"
-        return result
+        return mad_detector(current, effective_history, threshold=threshold)
+
+    if method == "zscore":
+        return zscore_detector(current, effective_history, threshold=threshold)
+
+    if method == "auto":
+        # Smart selection: use robust MAD if history >= 5, else Z-score
+        vals = np.asarray(effective_history, dtype=float)
+        if vals.size >= 5:
+            res = mad_detector(current, effective_history, threshold=threshold)
+            res["method"] = "auto:mad"
+        else:
+            res = zscore_detector(current, effective_history, threshold=threshold)
+            res["method"] = "auto:zscore"
+
+        if context_applied:
+            res["reason"] += f"; context=[{', '.join(context_applied)}]"
+        return res
+
     raise ValueError(f"Unsupported method: {method}")

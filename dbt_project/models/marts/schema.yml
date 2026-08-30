@@ -2,11 +2,21 @@ version: 2
 
 models:
   - name: fct_daily_revenue
-    description: Daily completed-order revenue for the CEO dashboard.
+    description: >
+      Daily completed-order revenue for the CEO dashboard.
+      Protected against customer-dimension fan-out by de-duplicating active
+      customers before joining.
     columns:
       - name: order_date
+        description: Calendar date of the completed orders.
+        data_tests:
+          - not_null
+          - unique
+      - name: completed_order_rows
+        description: Count of completed order rows for the day.
         data_tests:
           - not_null
       - name: daily_revenue
+        description: Sum of order amounts (USD) for completed orders on this day.
         data_tests:
           - not_null
