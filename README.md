@@ -1,4 +1,4 @@
-# Lab 27 — Data Reliability Game Day
+# Data-Reliability-Game-Day-Lab
 
 **Chủ đề:** Data Observability, Data Contracts, dbt Testing, Anomaly Detection, Lineage, SLO và Incident Response  
 **Thời lượng gợi ý:** 120 phút  
